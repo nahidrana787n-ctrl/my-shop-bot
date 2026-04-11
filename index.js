@@ -1,7 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const http = require('http');
 
-// --- Render Status 1 Error Fix (এটি ডিলিট করবেন না) ---
+// --- Render Status 1 Error Fix ---
 http.createServer((req, res) => {
   res.write("Bot is running perfectly!");
   res.end();
@@ -149,14 +149,23 @@ bot.action(/buy_(\d+)/, async (ctx) => {
   const pId = parseInt(ctx.match[1]);
   const product = products.find(p => p.id === pId);
   const u = users[ctx.from.id];
-  if (u.balance >= product.price) {
+  if (u && product && u.balance >= product.price) {
     u.balance -= product.price;
     u.spent += product.price;
     await safeDelete(ctx);
     await ctx.reply(`🎉 **কেনা সফল!**\n🎁 লিঙ্ক: ${product.content}`);
-    bot.telegram.sendMessage(ADMIN_ID, `💰 নতুন সেল! ইউজার: ${u.name}, গ্রুপ: ${product.name}`);
+    
+    // --- আপনার পছন্দের সুন্দর সেল নোটিশটি নিচে দেওয়া হলো ---
+    const adminMsg = `💰 **নতুন সেল!**\n` +
+                    `👤 ইউজার: ${u.name}\n` +
+                    `🆔 আইডি: \`${u.id}\`\n` +
+                    `📦 প্রোডাক্ট: ${product.name}\n` +
+                    `💸 দাম: ${product.price} TK`;
+    
+    bot.telegram.sendMessage(ADMIN_ID, adminMsg, { parse_mode: 'Markdown' });
+    
   } else {
-    await ctx.answerCbQuery('❌ ব্যালেন্স নেই!', { show_alert: true });
+    await ctx.answerCbQuery('❌ পর্যাপ্ত ব্যালেন্স নেই!', { show_alert: true });
   }
 });
 
