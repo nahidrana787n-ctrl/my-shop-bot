@@ -7,7 +7,7 @@ http.createServer((req, res) => {
   res.end();
 }).listen(process.env.PORT || 8080);
 
-// --- কনফিগারেশন (আপনার নতুন টোকেন এখানে আপডেট করা হয়েছে) ---
+// --- কনফিগারেশন ---
 const BOT_TOKEN = '7793480093:AAGGYBDV6zBOr5k2Z-HkdWqYGZDUQGId0G8'; 
 const ADMIN_ID = 8534308595; 
 const BKASH_NUMBER = '01741374715'; 
@@ -57,7 +57,7 @@ bot.start(async (ctx) => {
   await ctx.replyWithMarkdown(menu.text, menu.extra);
 });
 
-// --- ফাইল আপলোড এবং দাম সেট করা (অ্যাডমিন) ---
+// --- অ্যাডমিন ফাইল আপলোড এবং দাম সেট করা ---
 bot.on(['photo', 'video'], async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     
@@ -76,7 +76,7 @@ bot.on('text', async (ctx) => {
     const u = users[ctx.from.id];
     if (!u) return;
 
-    // অ্যাডমিন দ্বারা দাম সেট করা
+    // অ্যাডমিন দ্বারা ফটো/ভিডিও এর দাম সেট করা
     if (ctx.from.id === ADMIN_ID && adminState.fileId) {
         const price = parseFloat(ctx.message.text);
         if (isNaN(price)) return ctx.reply('❌ সঠিক দাম লিখুন।');
@@ -114,7 +114,7 @@ bot.on('text', async (ctx) => {
         return ctx.reply(`✅ গ্রুপ অ্যাড হয়েছে। ID: ${newId}`);
     }
 
-    // ডিপোজিট রিকোয়েস্ট হ্যান্ডেলার
+    // ডিপোজিট রিকোয়েস্ট অ্যামাউন্ট হ্যান্ডেলার
     if (u.state === 'waiting_deposit_amount') {
         const amount = parseFloat(ctx.message.text);
         if (isNaN(amount) || amount <= 0) return ctx.reply('❌ সঠিক সংখ্যা লিখুন।');
@@ -122,11 +122,29 @@ bot.on('text', async (ctx) => {
         await bot.telegram.sendMessage(ADMIN_ID, `🆕 **ডিপোজিট রিকোয়েস্ট!**\n🆔 আইডি: \`${ctx.from.id}\`\n💰 পরিমাণ: ${amount} TK`, {
             ...Markup.inlineKeyboard([[Markup.button.callback('✅ Approve', `app_${ctx.from.id}_${amount}`)], [Markup.button.callback('❌ Reject', `rej_${ctx.from.id}`)]])
         });
-        return ctx.reply('✅ রিকোয়েস্ট পাঠানো হয়েছে।');
+        return ctx.reply('✅ রিকোয়েস্ট পাঠানো হয়েছে। অ্যাডমিন চেক করে ব্যালেন্স অ্যাড করে দিবে।');
     }
 });
 
-// --- কালেকশন ডিসপ্লে ---
+// --- পেমেন্ট পেজ (আপনার আগের ডিজাইন অনুযায়ী) ---
+bot.action('deposit', async (ctx) => {
+  const depMsg = `💎 **পেমেন্ট মেথড সিলেক্ট করুন** 💎\n\n` +
+                 `📣 **বিকাশ (Personal):**\n` +
+                 `└─ \`${BKASH_NUMBER}\` 📲\n\n` +
+                 `📣 **নগদ (Personal):**\n` +
+                 `└─ \`${NAGAD_NUMBER}\` 📲\n\n` +
+                 `🆔 আপনার আইডি: \`${ctx.from.id}\``;
+  
+  await ctx.editMessageText(depMsg, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback('📩 ডিপোজিট রিকোয়েস্ট পাঠান', 'req_deposit')],
+      [Markup.button.callback('🔙 ফিরে যান', 'main_menu')]
+    ])
+  });
+});
+
+// --- কালেকশন ডিসপ্লে লজিক ---
 bot.action('photo_collection', (ctx) => {
     if (photos.length === 0) return ctx.answerCbQuery('❌ বর্তমানে কোনো ফটো নেই!', {show_alert: true});
     let btns = photos.map(p => [Markup.button.callback(`🖼️ ফটো #${p.id} ➥ ${p.price} TK`, `buyf_photo_${p.id}`)]);
@@ -156,7 +174,6 @@ bot.action(/buyf_(photo|video)_(\d+)/, async (ctx) => {
         else await ctx.replyWithVideo(item.fileId, { caption: "✅ আপনার কেনা ভিডিও!" });
         
         ctx.answerCbQuery('কেনা সফল!');
-        // সুন্দর সেল নোটিশ
         const adminMsg = `💰 **নতুন সেল! (${type})**\n👤 ইউজার: ${u.name}\n🆔 আইডি: \`${u.id}\`\n💸 দাম: ${item.price} TK`;
         bot.telegram.sendMessage(ADMIN_ID, adminMsg, { parse_mode: 'Markdown' });
     } else {
@@ -192,10 +209,19 @@ bot.action(/confirm_(\d+)/, async (ctx) => {
     await ctx.editMessageText('⚠️ আপনি কি নিশ্চিত?', Markup.inlineKeyboard([[Markup.button.callback('✅ হ্যাঁ', `buy_${pId}`)], [Markup.button.callback('❌ না', 'shop')]]));
 });
 
-bot.action('deposit', (ctx) => ctx.editMessageText(`💰 পেমেন্ট মেথড:\nবিকাশ/নগদ: ${BKASH_NUMBER}`, Markup.inlineKeyboard([[Markup.button.callback('📩 রিকোয়েস্ট পাঠান', 'req_deposit')], [Markup.button.callback('🔙 মেনু', 'main_menu')]])));
-bot.action('req_deposit', (ctx) => { users[ctx.from.id].state = 'waiting_deposit_amount'; ctx.reply('💰 কত টাকা পাঠিয়েছেন?'); });
+bot.action('req_deposit', (ctx) => { users[ctx.from.id].state = 'waiting_deposit_amount'; ctx.reply('💰 কত টাকা পাঠিয়েছেন? শুধু সংখ্যাটি লিখুন।'); });
 bot.action('main_menu', async (ctx) => { const u = users[ctx.from.id]; const menu = getMainMenu(u); await ctx.editMessageText(menu.text, { parse_mode: 'Markdown', ...menu.extra }); });
 bot.action('profile', async (ctx) => { const u = users[ctx.from.id]; await ctx.editMessageText(`👤 **প্রোফাইল**\n\n🆔 আইডি: \`${u.id}\`\n💰 ব্যালেন্স: ${u.balance.toFixed(2)} TK`, Markup.inlineKeyboard([[Markup.button.callback('🔙 ফিরে যান', 'main_menu')]])); });
 
+bot.action(/app_(\d+)_([\d.]+)/, async (ctx) => {
+    const targetId = ctx.match[1];
+    const amount = parseFloat(ctx.match[2]);
+    if (users[targetId]) {
+        users[targetId].balance += amount;
+        bot.telegram.sendMessage(targetId, `🎉 অভিনন্দন! ${amount} TK ডিপোজিট অ্যাপ্রুভ হয়েছে।`);
+        ctx.editMessageText(`✅ আইডি ${targetId} এর জন্য ${amount} TK অ্যাপ্রুভ হয়েছে।`);
+    }
+});
+
 bot.launch();
-console.log("বটটি নতুন টোকেন সহ পুরোপুরি সচল!");
+console.log("বটটি আগের পেমেন্ট পেজ সহ সচল আছে!");
