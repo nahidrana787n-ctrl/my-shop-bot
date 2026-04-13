@@ -21,8 +21,9 @@ let products = [];
 let photos = []; 
 let videos = []; 
 
-// অ্যাডমিন স্টেট ম্যানেজমেন্ট
-let adminState = { type: null, fileId: null };
+// অ্যাডমিন স্টেট ম্যানেজমেন্ট (একাধিক ফাইল হ্যান্ডেল করার জন্য)
+let adminUploads = { type: null, files: [], timer: null };
+let noticeState = { waiting: false };
 
 // --- মেইন মেনু UI ---
 function getMainMenu(u) {
@@ -41,9 +42,9 @@ function getMainMenu(u) {
       [Markup.button.callback('👉🏻 গ্রুপ কিনুন 👈🏻', 'shop')],
       [Markup.button.callback('💳 টাকা অ্যাড করুন', 'deposit'), Markup.button.callback('👤 প্রোফাইল', 'profile')],
       [Markup.button.callback('🎁 রেফার', 'refer'), Markup.button.callback('📊 হিস্টোরি', 'history')],
-      [Markup.button.url('📞 সাপোর্ট টিম', 'https://t.me/mdnahidranaa')],
       [Markup.button.callback('🥵 ফটো কালেকশন 🥵', 'photo_collection')],
-      [Markup.button.callback('💋 প্রিমিয়াম ভিডিও 💋', 'video_collection')]
+      [Markup.button.callback('💋 প্রিমিয়াম ভিডিও 💋', 'video_collection')],
+      [Markup.button.url('📞 সাপোর্ট টিম', 'https://t.me/mdnahidranaa')] // সবার নিচে সাপোর্ট বাটন
     ])
   };
 }
@@ -57,109 +58,110 @@ bot.start(async (ctx) => {
   await ctx.replyWithMarkdown(menu.text, menu.extra);
 });
 
-// --- অ্যাডমিন ফাইল আপলোড এবং দাম সেট করা ---
+// --- অ্যাডমিন ফাইল আপলোড (১০ সেকেন্ড লজিক) ---
 bot.on(['photo', 'video'], async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
+
+    // নোটিশ হিসেবে ফটো/ভিডিও পাঠালে তা সেভ হবে না, সরাসরি ব্রডকাস্ট হবে
+    if (noticeState.waiting) return;
+
+    const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : ctx.message.video.file_id;
+    const type = ctx.message.photo ? 'photo' : 'video';
+
+    if (adminUploads.timer) clearTimeout(adminUploads.timer);
     
-    if (ctx.message.photo) {
-        adminState.fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-        adminState.type = 'photo';
-    } else {
-        adminState.fileId = ctx.message.video.file_id;
-        adminState.type = 'video';
-    }
-    
-    await ctx.reply(`📩 আপনি একটি ${adminState.type} পাঠিয়েছেন। এটার দাম কত টাকা হবে? শুধু সংখ্যাটি লিখুন।`);
+    adminUploads.type = type;
+    adminUploads.files.push(fileId);
+
+    adminUploads.timer = setTimeout(async () => {
+        await ctx.reply(`📩 আপনি ${adminUploads.files.length}টি ${adminUploads.type} পাঠিয়েছেন।\n\nসবগুলো মিলে একসাথে দাম কত হবে? শুধু সংখ্যাটি লিখুন।`);
+        adminUploads.waitingPrice = true;
+    }, 10000); // ১০ সেকেন্ড অপেক্ষা
 });
 
 bot.on('text', async (ctx) => {
     const u = users[ctx.from.id];
     if (!u) return;
 
-    // অ্যাডমিন দ্বারা ফটো/ভিডিও এর দাম সেট করা
-    if (ctx.from.id === ADMIN_ID && adminState.fileId) {
+    // ১ ক্লিকে নোটিশ পাঠানোর লজিক
+    if (ctx.from.id === ADMIN_ID && ctx.message.text === '/sendnotice') {
+        noticeState.waiting = true;
+        return ctx.reply('📢 সব ইউজারকে কি পাঠাতে চান? (মেসেজ/ফটো/ভিডিও দিন)');
+    }
+
+    if (ctx.from.id === ADMIN_ID && noticeState.waiting) {
+        noticeState.waiting = false;
+        const allUsers = Object.keys(users);
+        let count = 0;
+        allUsers.forEach(userId => {
+            bot.telegram.copyMessage(userId, ctx.from.id, ctx.message.message_id).catch(() => {});
+            count++;
+        });
+        return ctx.reply(`✅ মোট ${count} জন ইউজারের কাছে নোটিশ পাঠানো হয়েছে।`);
+    }
+
+    // অ্যাডমিন দাম সেট করা (ফটো/ভিডিও কালেকশন)
+    if (ctx.from.id === ADMIN_ID && adminUploads.waitingPrice) {
         const price = parseFloat(ctx.message.text);
         if (isNaN(price)) return ctx.reply('❌ সঠিক দাম লিখুন।');
         
-        const newItem = { id: Math.floor(100 + Math.random() * 899), fileId: adminState.fileId, price: price };
+        const newItem = { id: Math.floor(100 + Math.random() * 899), files: adminUploads.files, price: price, type: adminUploads.type };
         
-        if (adminState.type === 'photo') photos.push(newItem);
+        if (adminUploads.type === 'photo') photos.push(newItem);
         else videos.push(newItem);
         
-        ctx.reply(`✅ সফলভাবে ${price} টাকায় ${adminState.type} অ্যাড হয়েছে!`);
-        adminState = { type: null, fileId: null };
+        ctx.reply(`✅ সফলভাবে ${price} টাকায় ${adminUploads.files.length}টি ফাইল অ্যাড হয়েছে!`);
+        adminUploads = { type: null, files: [], timer: null, waitingPrice: false };
         return;
     }
 
-    // অ্যাডমিন কমান্ড: ইউজার প্রোফাইল চেক
+    // অ্যাডমিন কমান্ড: ইউজার চেক
     if (ctx.message.text.startsWith('/user') && ctx.from.id === ADMIN_ID) {
         const targetId = ctx.message.text.split(' ')[1];
         if (users[targetId]) {
             const info = users[targetId];
-            return ctx.reply(`👤 **ইউজার প্রোফাইল**\n\n📝 নাম: ${info.name}\n🆔 আইডি: \`${info.id}\`\n💰 ব্যালেন্স: ${info.balance.toFixed(2)} TK\n💸 মোট খরচ: ${info.spent.toFixed(2)} TK`);
-        } else {
-            return ctx.reply('❌ ইউজার পাওয়া যায়নি।');
+            return ctx.reply(`👤 প্রোফাইল: ${info.name}\n💰 ব্যালেন্স: ${info.balance.toFixed(2)} TK\n💸 খরচ: ${info.spent.toFixed(2)} TK`);
         }
     }
 
-    // প্রোডাক্ট অ্যাড কমান্ড
+    // প্রোডাক্ট অ্যাড
     if (ctx.message.text.startsWith('/addproduct') && ctx.from.id === ADMIN_ID) {
         const args = ctx.message.text.split(' ');
-        if (args.length < 4) return ctx.reply('সঠিক নিয়ম: /addproduct নাম দাম লিঙ্ক');
+        if (args.length < 4) return ctx.reply('নিয়ম: /addproduct নাম দাম লিঙ্ক');
         const name = args[1].replace(/_/g, ' '); 
         const price = parseFloat(args[2]);
         const content = args[3];
-        const newId = Math.floor(1000 + Math.random() * 9000);
-        products.push({ id: newId, name, price, content });
-        return ctx.reply(`✅ গ্রুপ অ্যাড হয়েছে। ID: ${newId}`);
+        products.push({ id: Math.floor(1000 + Math.random() * 9000), name, price, content });
+        return ctx.reply(`✅ গ্রুপ অ্যাড হয়েছে।`);
     }
 
-    // ডিপোজিট রিকোয়েস্ট অ্যামাউন্ট হ্যান্ডেলার
+    // ডিপোজিট হ্যান্ডেলার
     if (u.state === 'waiting_deposit_amount') {
         const amount = parseFloat(ctx.message.text);
-        if (isNaN(amount) || amount <= 0) return ctx.reply('❌ সঠিক সংখ্যা লিখুন।');
+        if (isNaN(amount) || amount <= 0) return ctx.reply('❌ সংখ্যা লিখুন।');
         u.state = null;
-        await bot.telegram.sendMessage(ADMIN_ID, `🆕 **ডিপোজিট রিকোয়েস্ট!**\n🆔 আইডি: \`${ctx.from.id}\`\n💰 পরিমাণ: ${amount} TK`, {
-            ...Markup.inlineKeyboard([[Markup.button.callback('✅ Approve', `app_${ctx.from.id}_${amount}`)], [Markup.button.callback('❌ Reject', `rej_${ctx.from.id}`)]])
-        });
-        return ctx.reply('✅ রিকোয়েস্ট পাঠানো হয়েছে। অ্যাডমিন চেক করে ব্যালেন্স অ্যাড করে দিবে।');
+        await bot.telegram.sendMessage(ADMIN_ID, `🆕 ডিপোজিট: ${amount} TK (ID: ${ctx.from.id})`, 
+            Markup.inlineKeyboard([[Markup.button.callback('✅ Approve', `app_${ctx.from.id}_${amount}`)]]));
+        return ctx.reply('✅ রিকোয়েস্ট পাঠানো হয়েছে।');
     }
 });
 
-// --- পেমেন্ট পেজ (আপনার আগের ডিজাইন অনুযায়ী) ---
-bot.action('deposit', async (ctx) => {
-  const depMsg = `💎 **পেমেন্ট মেথড সিলেক্ট করুন** 💎\n\n` +
-                 `📣 **বিকাশ (Personal):**\n` +
-                 `└─ \`${BKASH_NUMBER}\` 📲\n\n` +
-                 `📣 **নগদ (Personal):**\n` +
-                 `└─ \`${NAGAD_NUMBER}\` 📲\n\n` +
-                 `🆔 আপনার আইডি: \`${ctx.from.id}\``;
-  
-  await ctx.editMessageText(depMsg, {
-    parse_mode: 'Markdown',
-    ...Markup.inlineKeyboard([
-      [Markup.button.callback('📩 ডিপোজিট রিকোয়েস্ট পাঠান', 'req_deposit')],
-      [Markup.button.callback('🔙 ফিরে যান', 'main_menu')]
-    ])
-  });
-});
-
-// --- কালেকশন ডিসপ্লে লজিক ---
+// --- ফটো এবং ভিডিও কালেকশন ভিউ ---
 bot.action('photo_collection', (ctx) => {
-    if (photos.length === 0) return ctx.answerCbQuery('❌ বর্তমানে কোনো ফটো নেই!', {show_alert: true});
-    let btns = photos.map(p => [Markup.button.callback(`🖼️ ফটো #${p.id} ➥ ${p.price} TK`, `buyf_photo_${p.id}`)]);
+    if (photos.length === 0) return ctx.answerCbQuery('খালি!', {show_alert: true});
+    let btns = photos.map(p => [Markup.button.callback(`🖼️ ফটো প্যাক #${p.id} ➥ ${p.price} TK`, `buyf_photo_${p.id}`)]);
     btns.push([Markup.button.callback('🔙 ফিরে যান', 'main_menu')]);
     ctx.editMessageText('🥵 **ফটো কালেকশন** 🥵', Markup.inlineKeyboard(btns));
 });
 
 bot.action('video_collection', (ctx) => {
-    if (videos.length === 0) return ctx.answerCbQuery('❌ বর্তমানে কোনো ভিডিও নেই!', {show_alert: true});
-    let btns = videos.map(v => [Markup.button.callback(`📽️ ভিডিও #${v.id} ➥ ${v.price} TK`, `buyf_video_${v.id}`)]);
+    if (videos.length === 0) return ctx.answerCbQuery('খালি!', {show_alert: true});
+    let btns = videos.map(v => [Markup.button.callback(`📽️ ভিডিও প্যাক #${v.id} ➥ ${v.price} TK`, `buyf_video_${v.id}`)]);
     btns.push([Markup.button.callback('🔙 ফিরে যান', 'main_menu')]);
     ctx.editMessageText('💋 **প্রিমিয়াম ভিডিও** 💋', Markup.inlineKeyboard(btns));
 });
 
-// --- কেনা এবং সেল নোটিশ লজিক ---
+// --- ফাইল প্যাক কেনা লজিক ---
 bot.action(/buyf_(photo|video)_(\d+)/, async (ctx) => {
     const type = ctx.match[1];
     const id = parseInt(ctx.match[2]);
@@ -170,46 +172,51 @@ bot.action(/buyf_(photo|video)_(\d+)/, async (ctx) => {
     if (u && item && u.balance >= item.price) {
         u.balance -= item.price;
         u.spent += item.price;
-        if (type === 'photo') await ctx.replyWithPhoto(item.fileId, { caption: "✅ আপনার কেনা ফটো!" });
-        else await ctx.replyWithVideo(item.fileId, { caption: "✅ আপনার কেনা ভিডিও!" });
+        
+        // সব ফাইল একসাথে পাঠানো
+        for (const fileId of item.files) {
+            if (type === 'photo') await ctx.replyWithPhoto(fileId).catch(()=>{});
+            else await ctx.replyWithVideo(fileId).catch(()=>{});
+        }
         
         ctx.answerCbQuery('কেনা সফল!');
-        const adminMsg = `💰 **নতুন সেল! (${type})**\n👤 ইউজার: ${u.name}\n🆔 আইডি: \`${u.id}\`\n💸 দাম: ${item.price} TK`;
-        bot.telegram.sendMessage(ADMIN_ID, adminMsg, { parse_mode: 'Markdown' });
+        bot.telegram.sendMessage(ADMIN_ID, `💰 সেল: ${item.price} TK (ID: ${u.id})`);
     } else {
         ctx.answerCbQuery('❌ পর্যাপ্ত ব্যালেন্স নেই!', {show_alert: true});
     }
 });
 
+// পেমেন্ট পেজ
+bot.action('deposit', async (ctx) => {
+  const depMsg = `💎 **পেমেন্ট মেথড সিলেক্ট করুন** 💎\n\n📣 **বিকাশ (Personal):**\n└─ \`${BKASH_NUMBER}\` 📲\n\n📣 **নগদ (Personal):**\n└─ \`${NAGAD_NUMBER}\` 📲\n\n🆔 আপনার আইডি: \`${ctx.from.id}\``;
+  await ctx.editMessageText(depMsg, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('📩 ডিপোজিট রিকোয়েস্ট পাঠান', 'req_deposit')], [Markup.button.callback('🔙 ফিরে যান', 'main_menu')]]) });
+});
+
+// গ্রুপ কেনা লজিক (অক্ষত)
 bot.action(/buy_(\d+)/, async (ctx) => {
   const pId = parseInt(ctx.match[1]);
   const product = products.find(p => p.id === pId);
   const u = users[ctx.from.id];
   if (u && product && u.balance >= product.price) {
-    u.balance -= product.price;
-    u.spent += product.price;
+    u.balance -= product.price; u.spent += product.price;
     await ctx.reply(`🎉 **কেনা সফল!**\n🎁 লিঙ্ক: ${product.content}`);
-    const adminMsg = `💰 **নতুন সেল!**\n👤 ইউজার: ${u.name}\n🆔 আইডি: \`${u.id}\`\n📦 প্রোডাক্ট: ${product.name}\n💸 দাম: ${product.price} TK`;
-    bot.telegram.sendMessage(ADMIN_ID, adminMsg, { parse_mode: 'Markdown' });
-  } else {
-    await ctx.answerCbQuery('❌ ব্যালেন্স নেই!', { show_alert: true });
-  }
+    bot.telegram.sendMessage(ADMIN_ID, `💰 সেল: ${product.name} (ID: ${u.id})`);
+  } else { await ctx.answerCbQuery('❌ ব্যালেন্স নেই!'); }
 });
 
-// --- অন্যান্য বাটন লজিক ---
 bot.action('shop', async (ctx) => {
-    if (products.length === 0) return ctx.answerCbQuery('❌ কোনো প্রোডাক্ট নেই!');
+    if (products.length === 0) return ctx.answerCbQuery('খালি!');
     let buttons = products.map(p => [Markup.button.callback(`🔹 ${p.name} ➥ ${p.price} TK`, `confirm_${p.id}`)]);
     buttons.push([Markup.button.callback('🔙 ফিরে যান', 'main_menu')]);
-    await ctx.editMessageText('🛍️ আমাদের গ্রুপ কালেকশন:', Markup.inlineKeyboard(buttons));
+    await ctx.editMessageText('🛍️ গ্রুপ কালেকশন:', Markup.inlineKeyboard(buttons));
 });
 
 bot.action(/confirm_(\d+)/, async (ctx) => {
     const pId = ctx.match[1];
-    await ctx.editMessageText('⚠️ আপনি কি নিশ্চিত?', Markup.inlineKeyboard([[Markup.button.callback('✅ হ্যাঁ', `buy_${pId}`)], [Markup.button.callback('❌ না', 'shop')]]));
+    await ctx.editMessageText('⚠️ নিশ্চিত?', Markup.inlineKeyboard([[Markup.button.callback('✅ হ্যাঁ', `buy_${pId}`)], [Markup.button.callback('❌ না', 'shop')]]));
 });
 
-bot.action('req_deposit', (ctx) => { users[ctx.from.id].state = 'waiting_deposit_amount'; ctx.reply('💰 কত টাকা পাঠিয়েছেন? শুধু সংখ্যাটি লিখুন।'); });
+bot.action('req_deposit', (ctx) => { users[ctx.from.id].state = 'waiting_deposit_amount'; ctx.reply('💰 কত টাকা পাঠিয়েছেন?'); });
 bot.action('main_menu', async (ctx) => { const u = users[ctx.from.id]; const menu = getMainMenu(u); await ctx.editMessageText(menu.text, { parse_mode: 'Markdown', ...menu.extra }); });
 bot.action('profile', async (ctx) => { const u = users[ctx.from.id]; await ctx.editMessageText(`👤 **প্রোফাইল**\n\n🆔 আইডি: \`${u.id}\`\n💰 ব্যালেন্স: ${u.balance.toFixed(2)} TK`, Markup.inlineKeyboard([[Markup.button.callback('🔙 ফিরে যান', 'main_menu')]])); });
 
@@ -218,10 +225,10 @@ bot.action(/app_(\d+)_([\d.]+)/, async (ctx) => {
     const amount = parseFloat(ctx.match[2]);
     if (users[targetId]) {
         users[targetId].balance += amount;
-        bot.telegram.sendMessage(targetId, `🎉 অভিনন্দন! ${amount} TK ডিপোজিট অ্যাপ্রুভ হয়েছে।`);
-        ctx.editMessageText(`✅ আইডি ${targetId} এর জন্য ${amount} TK অ্যাপ্রুভ হয়েছে।`);
+        bot.telegram.sendMessage(targetId, `🎉 ${amount} TK অ্যাপ্রুভ হয়েছে।`);
+        ctx.editMessageText(`✅ অ্যাপ্রুভড।`);
     }
 });
 
 bot.launch();
-console.log("বটটি আগের পেমেন্ট পেজ সহ সচল আছে!");
+console.log("বটটি সম্পূর্ণ আপডেট সহ সচল আছে!");
