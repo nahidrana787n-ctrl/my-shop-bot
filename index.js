@@ -8,8 +8,8 @@ http.createServer((req, res) => {
 }).listen(process.env.PORT || 8080);
 
 // --- কনফিগারেশন ---
-const BOT_TOKEN = '7793480093:AAGGYBDV6zBOr5k2Z-HkdWqYGZDUQGId0G8'; 
-const ADMIN_ID = 8534308595; 
+const BOT_TOKEN = '8759276787:AAEK57YBGY6plwsqf2q_HxotVlcdTM5qJG8'; 
+const ADMIN_ID = 8651688458; 
 const BKASH_NUMBER = '01741374715'; 
 const NAGAD_NUMBER = '01741374715'; 
 const REFER_BONUS = 5.0; 
